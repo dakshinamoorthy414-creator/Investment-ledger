@@ -279,12 +279,6 @@
 <div id="recentList"></div>
 
 <button class="fab" id="addBtn">＋ Add investment</button>
-
-<div class="footer-actions">
-  <button id="exportBtn">Export backup</button>
-  <button id="importBtn">Import backup</button>
-  <button id="manageCatBtn">Categories</button>
-</div>
 <input type="file" id="importFile" accept="application/json">
 
 <!-- Add entry modal -->
@@ -338,6 +332,11 @@
 <div class="modal-overlay" id="menuOverlay">
   <div class="modal">
     <h3>Data</h3>
+    <div class="modal-btns" style="flex-direction:column;">
+      <button class="btn btn-secondary" id="exportBtn">Export backup</button>
+      <button class="btn btn-secondary" id="importBtn">Import backup</button>
+      <button class="btn btn-secondary" id="manageCatBtn">Manage categories</button>
+    </div>
     <div class="modal-btns"><button class="btn btn-secondary" id="closeMenu">Close</button></div>
   </div>
 </div>
@@ -456,7 +455,17 @@
       category = val;
     }
     if(!date || !amount || !category) return;
-    entries.push({id:uid(), date, amount, category, note});
+
+    const existing = entries.find(e=>e.category.toLowerCase()===category.toLowerCase());
+    if(existing){
+      existing.amount += amount;
+      if(date >= existing.date) existing.date = date;
+      if(note){
+        existing.note = existing.note ? existing.note + ' · ' + note : note;
+      }
+    } else {
+      entries.push({id:uid(), date, amount, category, note});
+    }
     save();
     e.target.reset();
     renderCatSelect();
@@ -677,7 +686,7 @@
   document.getElementById('closeMenu').addEventListener('click', ()=> closeOverlay('menuOverlay'));
   document.getElementById('menuOverlay').addEventListener('click', e=>{ if(e.target.id==='menuOverlay') closeOverlay('menuOverlay'); });
 
-  document.getElementById('manageCatBtn').addEventListener('click', ()=>{ renderCatManage(); openOverlay('catOverlay'); });
+  document.getElementById('manageCatBtn').addEventListener('click', ()=>{ closeOverlay('menuOverlay'); renderCatManage(); openOverlay('catOverlay'); });
   document.getElementById('closeCat').addEventListener('click', ()=> closeOverlay('catOverlay'));
   document.getElementById('catOverlay').addEventListener('click', e=>{ if(e.target.id==='catOverlay') closeOverlay('catOverlay'); });
 
