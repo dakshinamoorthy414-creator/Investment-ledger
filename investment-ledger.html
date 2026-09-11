@@ -160,6 +160,12 @@
     text-align:center; color:var(--ink-soft); font-size:13px; padding:24px 10px;
     background:var(--card); border:1px dashed var(--paper-line); border-radius:14px;
   }
+  .hist-row{
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:13px; padding:8px 10px; background:var(--paper); border-radius:8px;
+  }
+  .hist-row .h-date{ color:var(--ink-soft); }
+  .hist-row .h-amt{ font-weight:600; }
 
   .fab{
     position:fixed;
@@ -273,7 +279,7 @@
 </div>
 
 <div class="section-heading">
-  <span>Recent</span>
+  <span>Portfolio</span>
   <span class="view-all" id="viewAllBtn" style="display:none;">Full history →</span>
 </div>
 <div id="recentList"></div>
@@ -281,10 +287,40 @@
 <button class="fab" id="addBtn">＋ Add investment</button>
 <input type="file" id="importFile" accept="application/json">
 
-<!-- Add entry modal -->
+<!-- Entry detail overlay -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
+      <div class="entry-icon" id="detailIcon" style="width:48px;height:48px;font-size:22px;"></div>
+      <div>
+        <h3 id="detailCategory" style="margin:0;">Category</h3>
+        <div id="detailDate" style="font-size:12px;color:var(--ink-soft);"></div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Amount invested</label>
+      <div id="detailAmount" class="mono" style="font-size:26px;font-weight:600;color:var(--forest);"></div>
+    </div>
+    <div class="field" id="detailNoteField" style="display:none;">
+      <label>Note</label>
+      <div id="detailNote" style="font-size:14px;"></div>
+    </div>
+    <div class="field" id="detailHistoryField" style="display:none;">
+      <label>Investment history</label>
+      <div id="detailHistory" style="display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-secondary" id="closeDetail">Close</button>
+      <button class="btn btn-primary" id="editFromDetail">Edit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit entry modal -->
 <div class="modal-overlay" id="addOverlay">
   <div class="modal">
-    <h3>Add investment</h3>
+    <h3 id="addModalTitle">Add investment</h3>
+    <div id="addModalSubtitle" style="font-size:12px;color:var(--ink-soft);margin:-10px 0 14px;display:none;"></div>
     <form id="entryForm">
       <div class="row2">
         <div class="field">
@@ -312,6 +348,7 @@
         <input type="text" id="f-note" placeholder="e.g. SIP, lump sum, folio no.">
       </div>
       <div class="modal-btns">
+        <button type="button" class="btn btn-secondary" id="deleteEntryBtn" style="display:none;color:var(--terracotta);">Delete</button>
         <button type="button" class="btn btn-secondary" id="cancelAdd">Cancel</button>
         <button type="submit" class="btn btn-primary">Save entry</button>
       </div>
@@ -376,6 +413,8 @@
   let entries = JSON.parse(localStorage.getItem(LS_ENTRIES) || '[]');
   let categories = JSON.parse(localStorage.getItem(LS_CATS) || 'null') || DEFAULT_CATS.slice();
   let pendingDelete = null;
+  let editingId = null;
+  let viewingId = null;
   let undoTimer = null;
 
   function save(){
@@ -435,10 +474,43 @@
   });
 
   document.getElementById('addBtn').addEventListener('click', ()=>{
+    editingId = null;
+    document.getElementById('addModalTitle').textContent = 'Add investment';
+    document.getElementById('addModalSubtitle').style.display = 'none';
+    document.getElementById('deleteEntryBtn').style.display = 'none';
+    document.getElementById('entryForm').reset();
     document.getElementById('f-date').valueAsDate = new Date();
+    renderCatSelect();
+    newCatField.style.display = 'none';
     openOverlay('addOverlay');
   });
   document.getElementById('cancelAdd').addEventListener('click', ()=> closeOverlay('addOverlay'));
+
+  function openEditModal(id){
+    const entry = entries.find(en=>en.id===id);
+    if(!entry) return;
+    editingId = id;
+    const dateLabel = new Date(entry.date+'T00:00:00').toLocaleDateString('en-IN', {day:'numeric', month:'long', year:'numeric'});
+    document.getElementById('addModalTitle').textContent = entry.category;
+    const sub = document.getElementById('addModalSubtitle');
+    sub.textContent = 'Invested on ' + dateLabel;
+    sub.style.display = 'block';
+    document.getElementById('deleteEntryBtn').style.display = 'block';
+    renderCatSelect();
+    newCatField.style.display = 'none';
+    document.getElementById('f-date').value = entry.date;
+    document.getElementById('f-amount').value = entry.amount;
+    catSelect.value = entry.category;
+    document.getElementById('f-note').value = entry.note || '';
+    openOverlay('addOverlay');
+  }
+
+  document.getElementById('deleteEntryBtn').addEventListener('click', ()=>{
+    if(!editingId) return;
+    closeOverlay('addOverlay');
+    confirmDelete(editingId);
+    editingId = null;
+  });
 
   document.getElementById('entryForm').addEventListener('submit', e=>{
     e.preventDefault();
@@ -456,15 +528,29 @@
     }
     if(!date || !amount || !category) return;
 
-    const existing = entries.find(e=>e.category.toLowerCase()===category.toLowerCase());
-    if(existing){
-      existing.amount += amount;
-      if(date >= existing.date) existing.date = date;
-      if(note){
-        existing.note = existing.note ? existing.note + ' · ' + note : note;
+    if(editingId){
+      const entry = entries.find(en=>en.id===editingId);
+      if(entry){
+        entry.date = date;
+        entry.amount = amount;
+        entry.category = category;
+        entry.note = note;
+        entry.history = [{date, amount, note}];
       }
+      editingId = null;
     } else {
-      entries.push({id:uid(), date, amount, category, note});
+      const existing = entries.find(e=>e.category.toLowerCase()===category.toLowerCase());
+      if(existing){
+        if(!existing.history) existing.history = [{date: existing.date, amount: existing.amount, note: existing.note}];
+        existing.history.push({date, amount, note});
+        existing.amount += amount;
+        if(date >= existing.date) existing.date = date;
+        if(note){
+          existing.note = existing.note ? existing.note + ' · ' + note : note;
+        }
+      } else {
+        entries.push({id:uid(), date, amount, category, note, history:[{date, amount, note}]});
+      }
     }
     save();
     e.target.reset();
@@ -581,9 +667,50 @@
         if(delta < -50) confirmDelete(row.getAttribute('data-id'));
         delta = 0;
       });
-      row.addEventListener('dblclick', ()=> confirmDelete(row.getAttribute('data-id')));
+      row.addEventListener('click', ()=> openDetailModal(row.getAttribute('data-id')));
     });
   }
+
+  function openDetailModal(id){
+    const entry = entries.find(en=>en.id===id);
+    if(!entry) return;
+    viewingId = id;
+    const info = catInfo(entry.category);
+    const dateLabel = new Date(entry.date+'T00:00:00').toLocaleDateString('en-IN', {day:'numeric', month:'long', year:'numeric'});
+    document.getElementById('detailIcon').style.background = info.color + '22';
+    document.getElementById('detailIcon').style.color = info.color;
+    document.getElementById('detailIcon').textContent = info.icon;
+    document.getElementById('detailCategory').textContent = entry.category;
+    document.getElementById('detailDate').textContent = 'Invested on ' + dateLabel;
+    document.getElementById('detailAmount').textContent = fmt(entry.amount);
+    const noteField = document.getElementById('detailNoteField');
+    if(entry.note){
+      noteField.style.display = 'block';
+      document.getElementById('detailNote').textContent = entry.note;
+    } else {
+      noteField.style.display = 'none';
+    }
+    const histField = document.getElementById('detailHistoryField');
+    const histWrap = document.getElementById('detailHistory');
+    if(entry.history && entry.history.length > 1){
+      histField.style.display = 'block';
+      const sorted = [...entry.history].sort((a,b)=> b.date.localeCompare(a.date));
+      histWrap.innerHTML = sorted.map(h=>{
+        const dl = new Date(h.date+'T00:00:00').toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'});
+        return `<div class="hist-row"><span class="h-date">${dl}${h.note ? ' · '+escapeHtml(h.note) : ''}</span><span class="h-amt mono">${fmt(h.amount)}</span></div>`;
+      }).join('');
+    } else {
+      histField.style.display = 'none';
+      histWrap.innerHTML = '';
+    }
+    openOverlay('detailOverlay');
+  }
+  document.getElementById('closeDetail').addEventListener('click', ()=> closeOverlay('detailOverlay'));
+  document.getElementById('detailOverlay').addEventListener('click', e=>{ if(e.target.id==='detailOverlay') closeOverlay('detailOverlay'); });
+  document.getElementById('editFromDetail').addEventListener('click', ()=>{
+    closeOverlay('detailOverlay');
+    if(viewingId) openEditModal(viewingId);
+  });
 
   function confirmDelete(id){
     const idx = entries.findIndex(e=>e.id===id);
